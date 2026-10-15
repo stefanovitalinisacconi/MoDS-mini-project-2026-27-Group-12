@@ -261,6 +261,81 @@ t_sv = t6(1:n_sv:end);
 T_sv = nan(N,length(t_sv));
 T_cells = T_print_C*ones(N,1);
 
+for k = 1:length(t6)
+    active = t_dep<=t6(k);
+    if mod(k-1,n_sv)==0
+        T_sv(active,(k-1)/n_sv+1) = T_cells(active);
+    end
+    left = circshift(active,1);
+    right = circshift(active,-1);
+    if ~active(N)
+        left(1)=false;
+        right(N)=false;
+    end
+    heat = k_f/ds^2*(left.*(circshift(T_cells,1)-T_cells) ...
+        + right.*(circshift(T_cells,-1)-T_cells)) ...
+        + h_b/w*(T_plate_C-T_cells)+3*h_e/w*(T_air_C-T_cells);
+    T_cells = T_cells+dt*active.*heat/(rho_f*c_f);
+end
+
+T_an = T_inf+(T_print_C-T_inf)*exp(-(t_sv-t_dep)/tau_cool);
+fprintf('Filament length = %.1f mm, cooling tau = %.2f s, T_inf = %.1f C\n', ...
+    1e3*L_fil,tau_cool,T_inf);
+fprintf('Whole layer below T_g at t = %.1f s\n', ...
+    t_sv(find(t_sv>=t_end & max(T_sv)<T_glass_C,1)));
+fprintf('Nearly uniform (max-min < 1 K) at t = %.1f s\n', ...
+    t_sv(find(t_sv>t_end & max(T_sv)-min(T_sv)<1,1)));
+fprintf('Conduction changes T by > 1 K over %.1f mm only\n', ...
+    1e3*ds*max(sum(abs(T_sv-T_an)>1)));
+
+figure('Position',[100 100 900 650]);
+for panel = 1:2
+    j = round(5*panel/0.1)+1;
+    on = ~isnan(T_sv(:,j));
+    subplot(2,2,panel);
+    plot(1e3*xd,1e3*yd,':','Color',[0.7 0.7 0.7]); hold on;
+    scatter(1e3*interp1(t,xd,t_dep(on)), ...
+        1e3*interp1(t,yd,t_dep(on)),12,T_sv(on,j),'filled');
+    plot(1e3*(xc+a*cos(omega*5*panel)), ...
+        1e3*(yc+b*sin(omega*5*panel)),'kv','MarkerFaceColor','k');
+    axis equal; grid on; caxis([T_inf T_print_C]); colormap(jet);
+    cb = colorbar; ylabel(cb,'T [^oC]');
+    xlabel('x [mm]'); ylabel('y [mm]');
+    title(sprintf('layer at t = %g s',5*panel));
+end
+
+subplot(2,2,3); hold on;
+for tp = [2.5 5 7.5 10 15 20 30]
+    j = round(tp/0.1)+1;
+    last = find(~isnan(T_sv(:,j)),1,'last');
+    plot(1e3*s_c,T_sv(:,j));
+    text(1e3*s_c(last)+2,T_sv(last,j)+6,sprintf('%g s',tp));
+end
+grid on; axis([0 180 0 230]);
+xlabel('s [mm]'); ylabel('T [^oC]'); title('temperature along the path');
+
+subplot(2,2,4);
+plot(t_sv,T_sv([1 N/2 N],:),t_sv,max(T_sv),'k', ...
+    [0 40],[T_inf T_inf],'k--');
+grid on; axis([0 40 0 230]);
+xlabel('t [s]'); ylabel('T [^oC]'); title('temperature in time');
+legend('s = 0','s = L/2','s = L','max over layer','T_\infty');
+print(gcf,'q1_6_filament.png','-dpng','-r300');
+
+% Nozzle parameters
+Rn = 10;             % Heater resistance [Ohm]
+Ln = 0.002;          % Inductance [H]
+Cn = 220e-6;         % Capacitance [F]
+Ct = 10;             % Thermal capacity [J/K]
+Rt = 5;              % Thermal resistance [K/W]
+Te = T_air_C+273.15;         
+Tref = T_print_C+273.15;     
+Tlow = 80+273.15;            % Loading temperature [K]
+unhold = sqrt(Rn*(Tref-Te)/Rt);  % Holding voltage [V]
+
+nozzle_rhs = @(zz,un) [(zz(8)^2/Rn-(zz(7)-Te)/Rt)/Ct;
+    (zz(9)-zz(8)/Rn)/Cn;
+    (un-zz(8))/Ln];
 
 
 
