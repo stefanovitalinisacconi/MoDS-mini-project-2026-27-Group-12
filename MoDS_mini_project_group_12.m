@@ -230,6 +230,37 @@ ylabel('Voltage [V]');
 title('Heart - Motor Input Voltages');
 legend('u_l','u_r');
 
+%% Q1.6 
+
+% PLA and heat-exchange parameters
+rho_f = 1240;       % Filament density [kg/m^3]
+c_f = 1800;         % Specific heat [J/(kg*K)]
+k_f = 0.13;         % Thermal conductivity [W/(m*K)]
+w = 0.4e-3;         % Filament square cross-section side [m]
+h_b = 100;         % Heat transfer coefficient to plate [W/(m^2*K)]
+h_e = 30;          % Heat transfer coefficient to air [W/(m^2*K)]
+T_print_C = 210;    % COMMON nozzle [C]
+T_plate_C = 60;     % Plate temperature [C]
+T_air_C = 20;       % Ambient temperature [C]
+T_glass_C = 60;     % PLA glass transition temperature [C]
+
+% Discretized filament deposited along the Q1.4 ellipse
+s_p = cumtrapz(t,hypot(xd_dot,yd_dot));  % Printed arc length [m]
+L_fil = s_p(end);                         % Ellipse perimeter [m]
+N = 400;                                 % Number of filament cells
+ds = L_fil/N;                            % Cell length [m]
+s_c = ((1:N)'-0.5)*ds;                   % Cell centres [m]
+t_dep = interp1(s_p,t,s_c);              % Deposition times [s]
+tau_cool = rho_f*c_f*w/(h_b+3*h_e);     % Cooling time constant [s]
+T_inf = (h_b*T_plate_C+3*h_e*T_air_C)/(h_b+3*h_e);
+
+% Forward Euler on the growing printed domain
+t6 = 0:dt:40;
+n_sv = round(0.1/dt);
+t_sv = t6(1:n_sv:end);
+T_sv = nan(N,length(t_sv));
+T_cells = T_print_C*ones(N,1);
+
 
 
 
