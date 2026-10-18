@@ -358,7 +358,6 @@ mem.progress = 0;       % Accumulated printing time
 mem.replaced = false;   % Filament replacement request handled
 mem.done = false;       % Printing completed
 
-% Hybrid simulation
 while ~mem.done
 
     % FLOW MAP
@@ -368,7 +367,33 @@ while ~mem.done
     guard = @(tt,zz) printerGuard(tt,zz,q,mem,C,Tlow,Tref,t(end));
 
     % Integrate continuous dynamics until the guard is reached
-    [~,~,te,ze] = ode15s(flow,[t_start 180],z,odeset('Events',guard));
+    [~,zs,te,ze] = ode15s(flow,[t_start 180],z,odeset('Events',guard));
+    
+    if isempty(te)
+        error('Guard not reached in mode %d',q);
+    end
+
+    % INVARIANTS CHECK
+    xy = (C*zs(:,1:6)')'; % convert motor angles into cartesian positions
+
+    % print head must remain inside the 20cmx20cm workspace
+    valid = all(xy(:)>=-1e-5 & xy(:)<=0.20+1e-5);
+
+    % during the states wiping, heater off, loading and heating, the print head must remain near the wiping location
+    if q>=4 && q<=7
+        valid = valid && all(hypot(xy(:,1),xy(:,2))<=1e-3+1e-5);
+    end
+    
+    % Temperature constraints in the corresponding modes
+    if q==5
+        valid = valid && all(zs(:,7)>=Tlow-1e-3);
+    elseif q==6
+        valid = valid && all(zs(:,7)<=Tlow+1e-3);
+    elseif q==7
+        valid = valid && all(zs(:,7)<=Tref+1e-3);
+    end
+
+    assert(valid,'Invariant violated');
 
     % JUMP MAP
     q_old = q;
