@@ -337,5 +337,53 @@ nozzle_rhs = @(zz,un) [(zz(8)^2/Rn-(zz(7)-Te)/Rt)/Ct;
     (zz(9)-zz(8)/Rn)/Cn;
     (un-zz(8))/Ln];
 
+%% Q3.1 Filament replacement
+
+% The printer is modeled as a hybrid system with 8 discrete modes.
+% In each mode, the physical states follow continuous dynamics.
+% When a guard is reached, the jump map updates the mode and memory.
+
+Kp = 20;       % PD position gain [V/m]
+Kd = 4;        % PD velocity gain [V*s/m]
+
+% Initial physical state: 6 motor states and 3 nozzle states
+z = [x0; Tref; unhold; unhold/Rn];
+
+q = 1;         % Initial mode = printing
+t_start = 0;   % Initial simulation time
+
+% Controller memory
+mem.entry = 0;          % Entry time of the current mode
+mem.progress = 0;       % Accumulated printing time
+mem.replaced = false;   % Filament replacement request handled
+mem.done = false;       % Printing completed
+
+% Hybrid simulation
+while ~mem.done
+
+    % FLOW MAP
+    flow = @(tt,zz) printerFlow(tt,zz,q,mem,A,B,C,t,u,nozzle_rhs,Kp,Kd,unhold);
+
+    % GUARD
+    guard = @(tt,zz) printerGuard(tt,zz,q,mem,C,Tlow,Tref,t(end));
+
+    % Integrate continuous dynamics until the guard is reached
+    [~,~,te,ze] = ode15s(flow,[t_start 180],z,odeset('Events',guard));
+
+    % JUMP MAP
+    q_old = q;
+    t_start = te(end);
+
+    [z,q,mem] = printerJump(t_start,ze(end,:)',q,mem,C);
+
+    % Display transitions
+    if ~mem.done
+        fprintf('Mode %d -> %d at t = %.2f s\n',q_old,q,t_start);
+    end
+
+end
+
+fprintf('Printing completed at t = %.2f s\n',t_start);
+
 
 
