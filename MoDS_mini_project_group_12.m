@@ -346,6 +346,10 @@ nozzle_rhs = @(zz,un) [(zz(8)^2/Rn-(zz(7)-Te)/Rt)/Ct;
 Kp = 20;       % PD position gain [V/m]
 Kd = 4;        % PD velocity gain [V*s/m]
 
+% Desired Cartesian position and velocity from Q1.4
+r_ref = [xd(:),yd(:)];
+v_ref = [xd_dot(:),yd_dot(:)];
+
 % Initial physical state: 6 motor states and 3 nozzle states
 z = [x0; Tref; unhold; unhold/Rn];
 
@@ -366,7 +370,7 @@ mode_sim = [];    % Discrete modes
 while ~mem.done
 
     % FLOW MAP
-    flow = @(tt,zz) printerFlow(tt,zz,q,mem,A,B,C,t,u,nozzle_rhs,Kp,Kd,unhold);
+    flow = @(tt,zz) printerFlow(tt,zz,q,mem,A,B,C,t,u,r_ref,v_ref,nozzle_rhs,Kp,Kd,unhold);
 
     % GUARD
     guard = @(tt,zz) printerGuard(tt,zz,q,mem,C,Tlow,Tref,t(end));

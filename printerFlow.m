@@ -1,14 +1,30 @@
-function dz = printerFlow(tt,z,q,mem,A,B,C,t_ref,u_ref,nozzle_rhs,Kp,Kd,unhold)
+function dz = printerFlow(tt,z,q,mem,A,B,C,t_ref,u_ref,r_ref,v_ref,nozzle_rhs,Kp,Kd,unhold)
 
 % The flow map computes the derivatives of the 9 physical states.
 % Motor voltages depend on the current discrete mode.
 % The nozzle voltage also changes according to the active mode.
+
+pos = C*z(1:6); % Compute position from motor angles
+vel = C(:,1:2)*z(3:4); % Compute velocity from motor angular velocities
 
 if q == 1  % Printing
     
     t_print = mem.progress + tt-mem.entry; % Calculate the printing time
     t_print = min(max(t_print,t_ref(1)),t_ref(end)); % Keep printing time within the available reference interval
     motor_u = interp1(t_ref,u_ref,t_print,'linear')'; % Obtain the motor voltages from the Q1.4 reference signals
+    
+    if mem.replaced
+
+        % Desired position and velocity
+        r_des = interp1(t_ref,r_ref,t_print,'linear')';
+        v_des = interp1(t_ref,v_ref,t_print,'linear')';
+
+        u_xy = Kp*(r_des-pos)+Kd*(v_des-vel);  % PD feedback for trajectory tracking
+
+        motor_u = motor_u + [1 1;1 -1]*u_xy;
+        motor_u = max(-24,min(24,motor_u));
+        
+    end  
 
 else % Other modes
 
@@ -22,10 +38,7 @@ else % Other modes
 
     end
 
-    pos = C*z(1:6); % Compute position from motor angles
-    vel = C(:,1:2)*z(3:4); % Compute velocity from motor angular velocities
-
-    u_xy = Kp*(target-pos)-Kd*vel; % PD controller
+    u_xy = Kp*(target-pos)-Kd*vel; % PD 
     motor_u = [1 1;1 -1]*u_xy; % Convert into left/right motor voltages
     motor_u = max(-24,min(24,motor_u)); % Limit motor voltages to [-24,24] V
 
