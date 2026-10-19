@@ -358,6 +358,11 @@ mem.progress = 0;       % Accumulated printing time
 mem.replaced = false;   % Filament replacement request handled
 mem.done = false;       % Printing completed
 
+% Store simulation results for plots
+t_sim = [];       % Simulation times
+z_sim = [];       % Continuous states
+mode_sim = [];    % Discrete modes
+
 while ~mem.done
 
     % FLOW MAP
@@ -367,7 +372,7 @@ while ~mem.done
     guard = @(tt,zz) printerGuard(tt,zz,q,mem,C,Tlow,Tref,t(end));
 
     % Integrate continuous dynamics until the guard is reached
-    [~,zs,te,ze] = ode15s(flow,[t_start 180],z,odeset('Events',guard));
+    [ts,zs,te,ze] = ode15s(flow,[t_start 180],z,odeset('Events',guard));
     
     if isempty(te)
         error('Guard not reached in mode %d',q);
@@ -395,6 +400,11 @@ while ~mem.done
 
     assert(valid,'Invariant violated');
 
+    % Store the continuous trajectory and active discrete mode
+    t_sim = [t_sim;ts];
+    z_sim = [z_sim;zs];
+    mode_sim = [mode_sim;q*ones(length(ts),1)];
+
     % JUMP MAP
     q_old = q;
     t_start = te(end);
@@ -410,5 +420,44 @@ end
 
 fprintf('Printing completed at t = %.2f s\n',t_start);
 
+%% Plots
+Q = ["Printing","Stop and Save","Moving to Wipe","Wiping","Heater Off","Loading Filament","Heating","Returning"];
 
+% Discrete mode evolution
+figure;
+stairs(t_sim,mode_sim,'LineWidth',1.5);
+yticks(1:8);
+yticklabels(Q);
+grid on;
+xlabel('Time [s]');
+ylabel('Discrete mode');
+title('Hybrid System - Discrete Modes');
 
+% Nozzle temperature
+figure;
+plot(t_sim,z_sim(:,7)-273.15,'LineWidth',1.5);
+hold on;
+yline(T_print_C,'--');
+yline(Tlow-273.15,'--');
+grid on;
+xlabel('Time [s]');
+ylabel('Temperature [C]');
+title('Hybrid System - Nozzle Temperature');
+
+xy = (C*z_sim(:,1:6)')'; % convert motor states into cartesian positions
+
+% Print-head trajectory during filament replacing process
+figure; hold on;
+plot(xd,yd,'k--'); % desired trajectory
+printing_xy = xy;
+printing_xy(mode_sim~=1,:) = NaN;
+plot(printing_xy(:,1),printing_xy(:,2),'b','LineWidth',2); % printing trajectory
+travel_xy = xy;
+travel_xy(~ismember(mode_sim,[2 3 8]),:) = NaN;
+plot(travel_xy(:,1),travel_xy(:,2),'k:'); % travel trajectory
+plot(0,0,'ko','MarkerFaceColor','k'); % wiping location
+plot(mem.saved(1),mem.saved(2),'bs','MarkerFaceColor','b'); % interruption point
+axis equal; grid on;
+xlabel('x [m]'); ylabel('y [m]');
+title('Filament Replacement');
+legend('Desired trajectory','Printing','Travel','Wipe location','Interruption');
