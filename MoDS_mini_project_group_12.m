@@ -339,9 +339,9 @@ nozzle_rhs = @(zz,un) [(zz(8)^2/Rn-(zz(7)-Te)/Rt)/Ct;
 
 %% Q3.1 Filament replacement
 
-% The printer is modeled as a hybrid system with 8 discrete modes.
-% In each mode, the physical states follow continuous dynamics.
-% When a guard is reached, the jump map updates the mode and memory.
+% The printer is modeled as a hybrid system with 8 operating modes.
+% continuous dynamics depend on the operating mode and the contact state.
+% Events update the mode and memory and contacts.
 
 Kp = 20;       % PD position gain [V/m]
 Kd = 4;        % PD velocity gain [V*s/m]
@@ -362,6 +362,22 @@ mem.progress = 0;       % Accumulated printing time
 mem.replaced = false;   % Filament replacement request handled
 mem.done = false;       % Printing completed
 
+% Head-parked detector
+mem.parked = 0;          % 0 No edge, 1 Left edge, 2 Bottom edge, 3 Origin
+
+% Homing commands
+mem.firstAxis = 'H';     % Select 'H' or 'V' as the first command
+mem.axis = mem.firstAxis;
+mem.hold = C*z(1:6);     % Position reference for the inactive axis
+mem.homeVoltage = 0.4;   % Homing voltage magnitude [V]
+
+% Periodic detector observations
+mem.samplePeriod = 0.1;  % Sampling period [s]
+mem.nextSample = Inf;    % Enabled when entering Moving to Wipe
+
+% Physical lower-stop contacts
+mem.contact = false(2,1); % [left; bottom]
+
 % Store simulation results for plots
 t_sim = [];       % Simulation times
 z_sim = [];       % Continuous states
@@ -373,10 +389,10 @@ while ~mem.done
     flow = @(tt,zz) printerFlow(tt,zz,q,mem,A,B,C,t,u,r_ref,v_ref,nozzle_rhs,Kp,Kd,unhold);
 
     % GUARD
-    guard = @(tt,zz) printerGuard(tt,zz,q,mem,C,Tlow,Tref,t(end));
+    guard = @(tt,zz) printerGuard(tt,zz,q,mem,C,Tlow,Tref,t(end),flow);
 
     % Integrate continuous dynamics until the guard is reached
-    [ts,zs,te,ze] = ode15s(flow,[t_start 180],z,odeset('Events',guard));
+    [ts,zs,te,ze,ie] = ode15s(flow,[t_start 180],z,odeset('Events',guard));
     
     if isempty(te)
         error('Guard not reached in mode %d',q);
@@ -412,11 +428,22 @@ while ~mem.done
     % JUMP MAP
     q_old = q;
     t_start = te(end);
+    z = ze(end,:)';
 
-    [z,q,mem] = printerJump(t_start,ze(end,:)',q,mem,C);
+    % Collect events occurring at the final integration time
+    event_ids = unique(ie(abs(te-t_start) < 1e-8));
+
+    % Handle physical events before a simultaneous controller event.
+    event_ids = [event_ids(event_ids ~= 1); event_ids(event_ids == 1)];
+
+    for event_id = event_ids(:)'
+
+    [z,q,mem] = printerJump(t_start,z,q,mem,C,event_id);
+
+    end
 
     % Display transitions
-    if ~mem.done
+    if ~mem.done && q ~= q_old
         fprintf('Mode %d -> %d at t = %.2f s\n',q_old,q,t_start);
     end
 
@@ -465,3 +492,4 @@ axis equal; grid on;
 xlabel('x [m]'); ylabel('y [m]');
 title('Filament Replacement');
 legend('Desired trajectory','Printing','Travel','Wipe location','Interruption');
+

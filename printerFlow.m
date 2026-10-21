@@ -1,4 +1,4 @@
-function dz = printerFlow(tt,z,q,mem,A,B,C,t_ref,u_ref,r_ref,v_ref,nozzle_rhs,Kp,Kd,unhold)
+function [dz,free_acc] = printerFlow(tt,z,q,mem,A,B,C,t_ref,u_ref,r_ref,v_ref,nozzle_rhs,Kp,Kd,unhold)
 
 % The flow map computes the derivatives of the 9 physical states.
 % Motor voltages depend on the current discrete mode.
@@ -26,17 +26,33 @@ if q == 1  % Printing
         
     end  
 
+elseif q == 3 % Moving to Wipe
+
+    % Hold the inactive axis at its entry position.
+    u_xy = Kp*(mem.hold-pos)-Kd*vel;
+    % Maintain a preload at previously reached stops.
+    u_xy(mem.contact) = -mem.homeVoltage-Kd*vel(mem.contact);
+
+    if mem.axis == 'H'
+        % Command motion towards the left stop.
+        u_xy(1) = -mem.homeVoltage-Kd*vel(1);
+    else
+        % Command motion towards the bottom stop.
+        u_xy(2) = -mem.homeVoltage-Kd*vel(2);
+    end
+
+    % Convert Cartesian commands into motor voltages.
+    motor_u = [1 1; 1 -1]*u_xy;
+    motor_u = max(-24,min(24,motor_u));
+
+elseif q >= 4 && q <= 7 % Keep the head against both stops
+
+    u_xy = -mem.homeVoltage*ones(2,1);
+    motor_u = [1 1;1 -1]*u_xy;
+
 else % Other modes
 
-    if q==2 || q==8 % Stop and Save / Returning
-
-        target = mem.saved; % Target is the position stored before filament replacement
-
-    else % Other non-printing modes
-
-        target = [0;0]; % Target is the wiping position at the origin
-
-    end
+    target = mem.saved; % Stop and Save / Returning
 
     u_xy = Kp*(target-pos)-Kd*vel; % PD 
     motor_u = [1 1;1 -1]*u_xy; % Convert into left/right motor voltages
@@ -62,5 +78,14 @@ end
 % Derivatives
 dz = [A*z(1:6)+B*motor_u;
     nozzle_rhs(z,nozzle_u)];
+
+% Free Cartesian acceleration, before contact reactions.
+S = C(:,1:2);
+free_acc = S*dz(3:4);
+
+% Constrain normal motion at active contacts.
+acc = free_acc;
+acc(mem.contact) = 0;
+dz(3:4) = S\acc;
 
 end

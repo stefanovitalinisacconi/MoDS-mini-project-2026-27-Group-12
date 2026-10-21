@@ -1,4 +1,4 @@
-function [value,stop,direction] = printerGuard(tt,z,q,mem,C,Tlow,Tref,t_end)
+function [value,stop,direction] = printerGuard(tt,z,q,mem,C,Tlow,Tref,t_end,flow)
 % The guard function defines the transition condition for each mode
 
 if q==1 % Printing
@@ -14,20 +14,19 @@ if q==1 % Printing
 
     direction = 1;     % Detect crossing from negative to positive
 
-elseif q==2 || q==3 || q==8 % Stop And Save/ Moving to wipe / Returning
+elseif q == 3 % Moving to Wipe
 
-    if q==3 % Moving to Wipe
-        target = [0;0]; % target is the origin
+    value = tt-mem.nextSample;
+    direction = 1; % Detect crossing from negative to positive
 
-    else % Stop and Save / Returning
-        target = mem.saved; % target is the saved position
 
-    end
+elseif q == 2 || q == 8 % Stop and Save / Returning
 
+    target = mem.saved;
     % Current position and velocity
     pos = C*z(1:6);
     vel = C(:,1:2)*z(3:4);
-    % Both conditions must be satisfied: position error <= 1 mm / velocity <= 1 mm/s
+    % Reach the saved position with sufficiently small velocity.
     value = max(norm(pos-target)-1e-3,norm(vel)-1e-3);
     direction = -1;    % Detect crossing from positive to negative
 
@@ -48,7 +47,25 @@ elseif q==7 % Heating
 
 end
 
-stop = 1;
-% The integration stops when the event is detected.
+% Physical lower-stop events.
+pos = C*z(1:6);
+[~,free_acc] = flow(tt,z);
+
+impact = pos;
+release = ones(2,1);
+
+for k = 1:2
+    if mem.contact(k)
+        impact(k) = 1;                  % Disable repeated impacts
+        release(k) = free_acc(k)-1e-9;   % Detect accceleration away from the stop
+    end
+end
+
+% 1 controller event
+% 2,3 are left/bottom impact
+% 4,5 are left/bottom release
+value = [value; impact; release];
+direction = [direction; -1; -1; 1; 1];
+stop = ones(size(value));
 
 end
