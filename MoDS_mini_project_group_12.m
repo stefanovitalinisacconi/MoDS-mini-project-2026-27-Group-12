@@ -1,4 +1,4 @@
-%% Mini project 2026/27 - Modelling of Dynamical Systems 
+%% Mini project 2026/27 - Modelling of Dynamical Systems
 
 % Stefano Vitalini Sacconi & Giovanni Masetti
 
@@ -50,21 +50,21 @@ yd_dddot = -b*omega^3*cos(omega*t);
 % State space matrices
 
 A = [0  0       1          0         0       0;
-     0  0       0          1         0       0;
-     0  0     -d1/Jeq   -d2/Jeq    Km/Jeq    0;
-     0  0     -d2/Jeq   -d1/Jeq      0     Km/Jeq;
-     0  0     -Km/Lm       0      -Rm/Lm     0;
-     0  0       0       -Km/Lm       0    -Rm/Lm];
+    0  0       0          1         0       0;
+    0  0     -d1/Jeq   -d2/Jeq    Km/Jeq    0;
+    0  0     -d2/Jeq   -d1/Jeq      0     Km/Jeq;
+    0  0     -Km/Lm       0      -Rm/Lm     0;
+    0  0       0       -Km/Lm       0    -Rm/Lm];
 
 B = [0       0;
-     0       0;
-     0       0;
-     0       0;
-     1/Lm    0;
-     0       1/Lm];
+    0       0;
+    0       0;
+    0       0;
+    1/Lm    0;
+    0       1/Lm];
 
 C = [rm/2   rm/2    0  0  0  0;
-     rm/2  -rm/2    0  0  0  0];
+    rm/2  -rm/2    0  0  0  0];
 
 % Direct transmission matrix
 D = zeros(2,2);
@@ -230,28 +230,28 @@ ylabel('Voltage [V]');
 title('Heart - Motor Input Voltages');
 legend('u_l','u_r');
 
-%% Q1.6 
+%% Q1.6
 
 % PLA and heat-exchange parameters
 rho_f = 1240;       % Filament density [kg/m^3]
 c_f = 1800;         % Specific heat [J/(kg*K)]
 k_f = 0.13;         % Thermal conductivity [W/(m*K)]
 w = 0.4e-3;         % Filament square cross-section side [m]
-h_b = 100;         % Heat transfer coefficient to plate [W/(m^2*K)]
-h_e = 30;          % Heat transfer coefficient to air [W/(m^2*K)]
-T_print_C = 210;    % COMMON nozzle [C]
+h_b = 100;          % Heat transfer coefficient to plate [W/(m^2*K)]
+h_e = 30;           % Heat transfer coefficient to air [W/(m^2*K)]
+T_print_C = 210;    % nozzle temperature [C]
 T_plate_C = 60;     % Plate temperature [C]
 T_air_C = 20;       % Ambient temperature [C]
 T_glass_C = 60;     % PLA glass transition temperature [C]
 
 % Discretized filament deposited along the Q1.4 ellipse
-s_p = cumtrapz(t,hypot(xd_dot,yd_dot));  % Printed arc length [m]
-L_fil = s_p(end);                         % Ellipse perimeter [m]
+s_p = cumtrapz(t,sqrt(xd_dot.^2 + yd_dot.^2));  % Printed arc length [m]
+L_fil = s_p(end);                        % Ellipse perimeter [m]
 N = 400;                                 % Number of filament cells
 ds = L_fil/N;                            % Cell length [m]
 s_c = ((1:N)'-0.5)*ds;                   % Cell centres [m]
 t_dep = interp1(s_p,t,s_c);              % Deposition times [s]
-tau_cool = rho_f*c_f*w/(h_b+3*h_e);     % Cooling time constant [s]
+tau_cool = rho_f*c_f*w/(h_b+3*h_e);      % Cooling time constant [s]
 T_inf = (h_b*T_plate_C+3*h_e*T_air_C)/(h_b+3*h_e);
 
 % Forward Euler on the growing printed domain
@@ -261,32 +261,43 @@ t_sv = t6(1:n_sv:end);
 T_sv = nan(N,length(t_sv));
 T_cells = T_print_C*ones(N,1);
 
+% Heat capacity of one cell and conductances
+C_cell = rho_f*c_f*w^2*ds;      % Heat capacity of one cell [J/K]
+G_cond = k_f*w^2/ds;            % Conductance between neighbouring cells [W/K]
+G_b = h_b*w*ds;                 % Conductance to the plate [W/K]
+G_e = 3*h_e*w*ds;               % Conductance to the air [W/K]
+Phi = zeros(N+1,1);             % Heat flows between the cells [W]
+
 for k = 1:length(t6)
-    active = t_dep<=t6(k);
+    n_p = sum(t_dep<=t6(k));    % Number of cells printed so far
     if mod(k-1,n_sv)==0
-        T_sv(active,(k-1)/n_sv+1) = T_cells(active);
+        T_sv(1:n_p,(k-1)/n_sv+1) = T_cells(1:n_p);
     end
-    left = circshift(active,1);
-    right = circshift(active,-1);
-    if ~active(N)
-        left(1)=false;
-        right(N)=false;
+    % Heat flows between printed neighbours (Phi(i): from cell i-1 to cell i)
+    Phi(2:n_p) = G_cond*(T_cells(1:n_p-1)-T_cells(2:n_p));
+    if n_p < N
+        Phi(1) = 0;             % insulated start of the filament
+        Phi(n_p+1) = 0;         % no flow towards unprinted cells
+    else                        % Ring closed: periodic boundary
+        Phi(N+1) = G_cond*(T_cells(N)-T_cells(1));
+        Phi(1) = Phi(N+1);
     end
-    heat = k_f/ds^2*(left.*(circshift(T_cells,1)-T_cells) ...
-        + right.*(circshift(T_cells,-1)-T_cells)) ...
-        + h_b/w*(T_plate_C-T_cells)+3*h_e/w*(T_air_C-T_cells);
-    T_cells = T_cells+dt*active.*heat/(rho_f*c_f);
+    % Heat from the plate and the air, and energy balance (eq 46) of the printed cells
+    Q_ext = G_b*(T_plate_C-T_cells)+G_e*(T_air_C-T_cells);
+    i = 1:n_p;
+    T_cells(i) = T_cells(i)+dt/C_cell*(Phi(i)-Phi(i+1)+Q_ext(i));
 end
 
-T_an = T_inf+(T_print_C-T_inf)*exp(-(t_sv-t_dep)/tau_cool);
+
 fprintf('Filament length = %.1f mm, cooling tau = %.2f s, T_inf = %.1f C\n', ...
     1e3*L_fil,tau_cool,T_inf);
 fprintf('Whole layer below T_g at t = %.1f s\n', ...
     t_sv(find(t_sv>=t_end & max(T_sv)<T_glass_C,1)));
 fprintf('Nearly uniform (max-min < 1 K) at t = %.1f s\n', ...
     t_sv(find(t_sv>t_end & max(T_sv)-min(T_sv)<1,1)));
-fprintf('Conduction changes T by > 1 K over %.1f mm only\n', ...
-    1e3*ds*max(sum(abs(T_sv-T_an)>1)));
+j10 = round(t_end/0.1)+1;
+fprintf('Start of the path: %.0f C when the ring closes, then up to %.0f C\n', ...
+    T_sv(1,j10), max(T_sv(1,j10:end)));
 
 figure('Position',[100 100 900 650]);
 for panel = 1:2
@@ -328,8 +339,8 @@ Ln = 0.002;          % Inductance [H]
 Cn = 220e-6;         % Capacitance [F]
 Ct = 10;             % Thermal capacity [J/K]
 Rt = 5;              % Thermal resistance [K/W]
-Te = T_air_C+273.15;         
-Tref = T_print_C+273.15;     
+Te = T_air_C+273.15;
+Tref = T_print_C+273.15;
 Tlow = 80+273.15;            % Loading temperature [K]
 unhold = sqrt(Rn*(Tref-Te)/Rt);  % Holding voltage [V]
 
@@ -393,7 +404,7 @@ while ~mem.done
 
     % Integrate continuous dynamics until the guard is reached
     [ts,zs,te,ze,ie] = ode15s(flow,[t_start 180],z,odeset('Events',guard));
-    
+
     if isempty(te)
         error('Guard not reached in mode %d',q);
     end
@@ -408,7 +419,7 @@ while ~mem.done
     if q>=4 && q<=7
         valid = valid && all(hypot(xy(:,1),xy(:,2))<=1e-3+1e-5);
     end
-    
+
     % Temperature constraints in the corresponding modes
     if q==5
         valid = valid && all(zs(:,7)>=Tlow-1e-3);
@@ -438,7 +449,7 @@ while ~mem.done
 
     for event_id = event_ids(:)'
 
-    [z,q,mem] = printerJump(t_start,z,q,mem,C,event_id);
+        [z,q,mem] = printerJump(t_start,z,q,mem,C,event_id);
 
     end
 
