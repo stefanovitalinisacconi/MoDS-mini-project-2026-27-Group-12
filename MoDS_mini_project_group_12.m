@@ -350,9 +350,7 @@ nozzle_rhs = @(zz,un) [(zz(8)^2/Rn-(zz(7)-Te)/Rt)/Ct;
 
 %% Q3.1 Filament replacement
 
-% The printer is modeled as a hybrid system with 8 operating modes.
-% continuous dynamics depend on the operating mode and the contact state.
-% Events update the mode and memory and contacts.
+% 8 operating modes, continuous dynamics depend on the operating mode and the contact state, events update the mode and memory and contacts
 
 Kp = 20;       % PD position gain [V/m]
 Kd = 4;        % PD velocity gain [V*s/m]
@@ -374,25 +372,25 @@ mem.replaced = false;   % Filament replacement request handled
 mem.done = false;       % Printing completed
 
 % Head-parked detector
-mem.parked = 0;          % 0 No edge, 1 Left edge, 2 Bottom edge, 3 Origin
+mem.parked = 0;          % 0 is No edge, 1 is Left edge, 2 is Bottom edge, 3 is Origin
 
 % Homing commands
-mem.firstAxis = 'H';     % Select 'H' or 'V' as the first command
+mem.firstAxis = 'H';     % 'H' (or in case 'V') as the first command
 mem.axis = mem.firstAxis;
 mem.hold = C*z(1:6);     % Position reference for the inactive axis
-mem.homeVoltage = 0.4;   % Homing voltage magnitude [V]
+mem.homeVoltage = 0.4;   % Homing voltage magnitude 
 
 % Periodic detector observations
-mem.samplePeriod = 0.1;  % Sampling period [s]
+mem.samplePeriod = 0.1;  % Sampling period 
 mem.nextSample = Inf;    % Enabled when entering Moving to Wipe
 
 % Physical lower-stop contacts
 mem.contact = false(2,1); % [left; bottom]
 
 % Store simulation results for plots
-t_sim = [];       % Simulation times
-z_sim = [];       % Continuous states
-mode_sim = [];    % Discrete modes
+t_sim = [];       
+z_sim = [];       
+mode_sim = [];   
 
 while ~mem.done
 
@@ -444,7 +442,7 @@ while ~mem.done
     % Collect events occurring at the final integration time
     event_ids = unique(ie(abs(te-t_start) < 1e-8));
 
-    % Handle physical events before a simultaneous controller event.
+    % Handle physical events before a simultaneous controller event
     event_ids = [event_ids(event_ids ~= 1); event_ids(event_ids == 1)];
 
     for event_id = event_ids(:)'
@@ -503,4 +501,71 @@ axis equal; grid on;
 xlabel('x [m]'); ylabel('y [m]');
 title('Filament Replacement');
 legend('Desired trajectory','Printing','Travel','Wipe location','Interruption');
+
+%% Q3.2 Draw a square
+
+% 4 discrete modes, each mode controls the motor angles to reach the next vertex
+
+square_side = 0.04;  % Square side length 
+
+Ktheta = 2;          % Angular position gain [V/rad]
+Komega = 0.2;        % Angular velocity gain [V*s/rad]
+
+theta_tol = 1e-4;    % Angular position tolerance 
+omega_tol = 1e-3;    % angular velocity tolerance 
+
+max_side_time = 10;  % max simulation time per side 
+
+square_modes = ["Right","Up","Left","Down"]; % Discrete modes
+
+vertices = [0.04  0.04+square_side  0.04+square_side  0.04  0.04;
+    0.04  0.04  0.04+square_side  0.04+square_side  0.04];
+
+% convert cartesian vertices into motor angular positions
+theta_vertices = [1 1;1 -1]*vertices/rm;
+
+% Initial physical state
+z_square = [theta_vertices(:,1);
+    zeros(4,1);
+    Tref;
+    unhold;
+    unhold/Rn];
+
+q_square = 1;  
+t_square = 0;  
+
+while q_square <= 4
+
+    % FLOW MAP
+    flow = @(tt,zz) squareF(tt,zz,q_square,theta_vertices,A,B,Ktheta,Komega,unhold,nozzle_rhs);
+
+    % GUARD
+    guard = @(tt,zz) squareG(tt,zz,q_square,theta_vertices,theta_tol,omega_tol);
+
+    % Integrate continuous dynamics until the guard is reached
+    [~,~,te,ze] = ode15s(flow,[t_square t_square+max_side_time],z_square,odeset('Events',guard,'RelTol',1e-7,'AbsTol',1e-9));
+
+    if isempty(te)
+        error('Guard not reached in mode %d',q_square);
+    end
+
+    % Display completed side
+    fprintf('%s completed at %.3f s\n',square_modes(q_square),te(end));
+
+    % JUMP MAP
+    [z_square,q_square] = squareJ(ze(end,:)',q_square);
+
+    % Restart integration from the event time
+    t_square = te(end);
+
+end
+
+% Final Cartesian position
+final_position = C*z_square(1:6);
+
+% Distance from the initial vertex
+closure_error = norm(final_position-vertices(:,1));
+
+fprintf('Total square time: %.3f s\n',t_square);
+fprintf('Square closure error: %.3e m\n',closure_error);
 
