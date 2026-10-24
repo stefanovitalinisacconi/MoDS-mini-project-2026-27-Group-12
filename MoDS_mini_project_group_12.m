@@ -534,6 +534,10 @@ z_square = [theta_vertices(:,1);
 q_square = 1;  
 t_square = 0;  
 
+t_square_sim = [];
+z_square_sim = [];
+mode_square_sim = [];
+
 while q_square <= 4
 
     % FLOW MAP
@@ -543,11 +547,16 @@ while q_square <= 4
     guard = @(tt,zz) squareG(tt,zz,q_square,theta_vertices,theta_tol,omega_tol);
 
     % Integrate continuous dynamics until the guard is reached
-    [~,~,te,ze] = ode15s(flow,[t_square t_square+max_side_time],z_square,odeset('Events',guard,'RelTol',1e-7,'AbsTol',1e-9));
+    [ts,zs,te,ze] = ode15s(flow,[t_square t_square+max_side_time],z_square,odeset('Events',guard,'RelTol',1e-7,'AbsTol',1e-9));
 
     if isempty(te)
         error('Guard not reached in mode %d',q_square);
     end
+
+    % Store the trajectory and active mode before applying the jump
+    t_square_sim = [t_square_sim; ts];
+    z_square_sim = [z_square_sim; zs];
+    mode_square_sim = [mode_square_sim;q_square*ones(length(ts),1)];
 
     % Display completed side
     fprintf('%s completed at %.3f s\n',square_modes(q_square),te(end));
@@ -568,4 +577,57 @@ closure_error = norm(final_position-vertices(:,1));
 
 fprintf('Total square time: %.3f s\n',t_square);
 fprintf('Square closure error: %.3e m\n',closure_error);
+
+xy_square = (C*z_square_sim(:,1:6)')';
+
+% max deviation from each side
+side_error = zeros(4,1);
+
+for k = 1:4
+    side = mode_square_sim == k;
+
+    if k == 1 || k == 3
+        % horizontal sides (y is constant)
+        deviation = xy_square(side,2)-vertices(2,k);
+    else
+        % vertical sides (x is constant
+        deviation = xy_square(side,1)-vertices(1,k);
+    end
+
+    side_error(k) = max(abs(deviation));
+
+    fprintf('max perpendicular error (%s) = %.3e m\n',square_modes(k),side_error(k));
+end
+
+% Desired and simulated square
+figure;
+plot(vertices(1,:),vertices(2,:),'k--','LineWidth',1.5);
+hold on;
+plot(xy_square(:,1),xy_square(:,2),'b','LineWidth',1.5);
+axis equal;
+grid on;
+xlabel('x [m]');
+ylabel('y [m]');
+title('Square - Desired and Simulated Trajectory');
+legend('Desired square','Simulated trajectory','Location','best');
+
+% Motor angular positions
+figure;
+plot(t_square_sim,z_square_sim(:,1:2),'LineWidth',1.5);
+grid on;
+xlabel('Time [s]');
+ylabel('Motor angle [rad]');
+title('Square - Motor Angular Positions');
+legend('\theta_l','\theta_r','Location','best');
+
+% Discrete mode evolution
+figure;
+stairs(t_square_sim,mode_square_sim,'LineWidth',1.5);
+yticks(1:4);
+yticklabels(square_modes);
+ylim([0.8 4.2]);
+grid on;
+xlabel('Time [s]');
+ylabel('Operating mode');
+title('Square - Discrete Modes');
 
